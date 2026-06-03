@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice Analyzer | GitHub Pages</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f8fafc;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #10b981;
+            --error: #ef4444;
+            --border: #334155;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+            max-width: 480px;
+            width: 100%;
+        }
+        h2 { text-align: center; margin-top: 0; font-size: 1.75rem; }
+        .instructions { font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.5rem; text-align: center; }
+        .form-group { margin-bottom: 1.25rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; font-size: 0.9rem; color: #cbd5e1; }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background-color: #0f172a;
+            color: white;
+            box-sizing: border-box;
+        }
+        input[type="file"] { padding: 0.5rem; }
+        button {
+            width: 100%;
+            background-color: var(--accent);
+            color: white;
+            padding: 0.85rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 0.5rem;
+        }
+        button:hover { background-color: var(--accent-hover); }
+        button:disabled { background-color: #475569; cursor: not-allowed; }
+        
+        #status-box { text-align: center; margin-top: 1rem; font-size: 0.9rem; color: #3b82f6; min-height: 1.25rem; }
+        #results {
+            margin-top: 1.5rem;
+            padding: 1.25rem;
+            border-radius: 8px;
+            background-color: #0f172a;
+            display: none;
+            text-align: center;
+            border: 1px solid var(--border);
+        }
+        .match-status { font-size: 1.5rem; font-weight: 800; margin-bottom: 0.25rem; }
+        .match-yes { color: var(--success); }
+        .match-no { color: var(--error); }
+        .confidence { font-size: 2.25rem; font-weight: 700; margin: 0.25rem 0; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>AI Voice Analyzer</h2>
+    <p class="instructions">Compare two audio recordings using Hugging Face AI models.</p>
+    
+    <div class="form-group">
+        <label for="hf-token">Hugging Face Access Token</label>
+        <input type="text" id="hf-token" placeholder="Paste hf_... token here" autocomplete="off">
+    </div>
+
+    <div class="form-group">
+        <label for="audio1">First Audio File (.mp3, .opus, .wav)</label>
+        <input type="file" id="audio1" accept="audio/*">
+    </div>
+
+    <div class="form-group">
+        <label for="audio2">Second Audio File (.mp3, .opus, .wav)</label>
+        <input type="file" id="audio2" accept="audio/*">
+    </div>
+
+    <button id="analyze-btn" onclick="startAnalysis()">Analyze Similarity</button>
+    <div id="status-box"></div>
+
+    <div id="results">
+        <div id="match-status" class="match-status"></div>
+        <div class="confidence" id="confidence-score">0.00%</div>
+        <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: #64748b;">Computed via Cosine Similarity matrix vectors.</p>
+    </div>
+</div>
+
+<script>
+    // Using an optimized audio-set feature extraction model hosted on Hugging Face
+    const HF_API_URL = "https://api-inference.huggingface.co/pipeline/feature-extraction/Xenova/ast-finetuned-audioset-10-10-0.4593";
+
+    async function sendToAI(file, token) {
+        const response = await fetch(HF_API_URL, {
+            headers: { "Authorization": `Bearer ${token}` },
+            method: "POST",
+            body: file
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Hugging Face Error: ${response.status}. Ensure your token is correct.`);
+        }
+        return await response.json();
+    }
+
+    function calculateCosineSimilarity(vectorA, vectorB) {
+        const arrA = vectorA.flat(Infinity);
+        const arrB = vectorB.flat(Infinity);
+        
+        let dotProduct = 0.0;
+        let magnitudeA = 0.0;
+        let magnitudeB = 0.0;
+        const targetLength = Math.min(arrA.length, arrB.length);
+
+        for (let i = 0; i < targetLength; i++) {
+            dotProduct += arrA[i] * arrB[i];
+            magnitudeA += arrA[i] * arrA[i];
+            magnitudeB += arrB[i] * arrB[i];
+        }
+
+        if (magnitudeA === 0 || magnitudeB === 0) return 0;
+        return dotProduct / (Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB));
+    }
+
+    async function startAnalysis() {
+        const token = document.getElementById('hf-token').value.trim();
+        const file1 = document.getElementById('audio1').files[0];
+        const file2 = document.getElementById('audio2').files[0];
+        
+        const btn = document.getElementById('analyze-btn');
+        const statusBox = document.getElementById('status-box');
+        const resultsArea = document.getElementById('results');
+
+        if (!token) return alert("Please input your Hugging Face Access Token.");
+        if (!file1 || !file2) return alert("Please select both audio files to begin.");
+
+        try {
+            btn.disabled = true;
+            resultsArea.style.display = "none";
+            
+            statusBox.innerText = "Analyzing Audio 1... (Cold starts take ~20s)";
+            const vector1 = await sendToAI(file1, token);
+            
+            statusBox.innerText = "Analyzing Audio 2...";
+            const vector2 = await sendToAI(file2, token);
+
+            statusBox.innerText = "Processing vectors...";
+            const similarityScore = calculateCosineSimilarity(vector1, vector2);
+            
+            // Normalize score from [-1, 1] range to standard [0, 100]% scale
+            const matchPercentage = Math.max(0, Math.min(100, ((similarityScore + 1) / 2) * 100));
+            
+            // Set 82% threshold for matching biological voices
+            const isVerificationMatch = matchPercentage >= 82;
+
+            statusBox.innerText = "";
+            resultsArea.style.display = "block";
+            
+            const matchStatus = document.getElementById('match-status');
+            const confidenceScore = document.getElementById('confidence-score');
+
+            confidenceScore.innerText = `${matchPercentage.toFixed(2)}%`;
+
+            if (isVerificationMatch) {
+                matchStatus.innerText = "✓ VOICE MATCH";
+                matchStatus.className = "match-status match-yes";
+            } else {
+                matchStatus.innerText = "✗ NO MATCH";
+                matchStatus.className = "match-status match-no";
+            }
+
+        } catch (err) {
+            console.error(err);
+            statusBox.innerText = "";
+            alert(`Error: ${err.message}`);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
